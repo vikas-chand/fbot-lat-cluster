@@ -42,7 +42,7 @@ if file_type == "csv":
     dec_list = df[column_dec].tolist()
 
 if file_type == "tab":
-    df = pd.read_csv(this_file, delim_whitespace=True)
+    df = pd.read_csv(this_file, sep=r'\s+')
     name_list = df[column_name].tolist()
     ra_list = df[column_ra].tolist()
     dec_list = df[column_dec].tolist()

@@ -332,7 +332,7 @@ class MakeStack(StackingAnalysis,Analyze):
                         this_index = str(index_list[i])
                         this_file = "%s_stacking_%s.txt" %(srcname,this_index)
 
-                        df = pd.read_csv(this_file,sep='\s+',names=["flux","index","likelihood","quality","status"])
+                        df = pd.read_csv(this_file,sep=r'\s+',names=["flux","index","likelihood","quality","status"])
 
                         flux = df["flux"]
                         index = df["index"]
@@ -425,7 +425,7 @@ class MakeStack(StackingAnalysis,Analyze):
                             this_index = str(index_list[i])
                             this_file = "%s_stacking_%s.txt" %(srcname,this_index)
                         
-                            df = pd.read_csv(this_file,sep='\s+',names=["flux","index","likelihood","quality","status"])
+                            df = pd.read_csv(this_file,sep=r'\s+',names=["flux","index","likelihood","quality","status"])
                         
                             flux = df["flux"]
                             index = df["index"]
@@ -510,7 +510,7 @@ class MakeStack(StackingAnalysis,Analyze):
 
         name_file = os.path.join(preprocess_home, "Preprocessed_Sources", 
                 "preprocessing_summary_" + self.run_name + ".txt")
-        df = pd.read_csv(name_file,sep='\s+',skiprows=skip_rows)
+        df = pd.read_csv(name_file,sep=r'\s+',skiprows=skip_rows)
         name_list = df["name"]
         ts_list = df["TS"]
 

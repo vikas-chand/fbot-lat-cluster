@@ -230,7 +230,7 @@ class StackingAnalysis:
             self.sample_name_list = df[self.column_name].tolist()
 
         if self.file_type == "tab":
-            df = pd.read_csv(self.sample_file, delim_whitespace=True)
+            df = pd.read_csv(self.sample_file, sep=r'\s+')
             self.sample_name_list = df[self.column_name].tolist()
 
         # Science Tools:
@@ -633,7 +633,7 @@ class StackingAnalysis:
 		
             if os.path.exists(wdir) == True:
                 this_file = wdir
-                df = pd.read_csv(this_file,sep='\s+',names=["name","dist_sep","flux","flux_err","index","index_err","flux_ul","TS"])
+                df = pd.read_csv(this_file,sep=r'\s+',names=["name","dist_sep","flux","flux_err","index","index_err","flux_ul","TS"])
                 df_full = pd.concat([df,df_full]).reset_index(drop=True)
 
         df_full = df_full.sort_values(by=["TS"],ascending=False).reset_index(drop=True)
