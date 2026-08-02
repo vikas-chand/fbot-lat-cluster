@@ -357,8 +357,8 @@ class StackingAnalysis:
                 yml.write("  ltcube : '%s'\n" %self.ltcube)
             yml.write("#--------#\n")
             yml.write("binning:\n")
-            yml.write("  roiwidth : 10\n")
-            yml.write("  binsz : 0.08\n")
+            yml.write("  roiwidth : 20\n")   # PATCH: 10 deg RADIUS (Principe 2023 / our unbinned); Karwin had 10 = 5 deg radius
+            yml.write("  binsz : 0.1\n")     # PATCH: Principe 2023 pixel size
             yml.write("  binsperdec : 8\n")
             yml.write("#--------#\n")
             yml.write("selection:\n")
@@ -384,8 +384,8 @@ class StackingAnalysis:
             yml.write("  galdiff : '%s'\n" %self.galdiff)
             yml.write("  isodiff : '%s'\n" %self.isodiff)
             yml.write("  catalogs :\n")
-            yml.write("    - '4FGL-DR3'\n")
-            yml.write("  extdir : '/zfs/astrohe/Software/fermipy_source/lib/python3.9/site-packages/fermipy-1.1.3+2.g21485-py3.9.egg/fermipy/data/catalogs/Extended_12years/'\n")
+            yml.write("    - '/Users/salim/Desktop/Projects/FXTs/FXT_Stack/gll_psc_v35.fit'\n")  # PATCH: 4FGL-DR4, matching the unbinned pipeline (Karwin had DR3)
+            yml.write("  extdir : '/Users/salim/anaconda3/envs/fermipy/lib/python3.9/site-packages/fermipy/data/catalogs/Extended_12years/'\n")
             yml.write("  sources :\n")
             yml.write("    - { 'name' : '%s', 'ra' : %s, 'dec' : %s, 'SpectrumType' : PowerLaw }\n" %(srcname,ra,dec))
             yml.write("#--------#\n")
@@ -542,7 +542,14 @@ class StackingAnalysis:
         if self.JLA == False:
             iteration_list = [0]
         if self.JLA == True:
-            iteration_list = [0,1,2,3]
+            # PATCH: Karwin hardcoded [0,1,2,3] because his JLA is always the
+            # 4-way PSF0-3 split. A Principe et al. 2023 style analysis splits
+            # into 3 ENERGY bands instead, so srcmap_03 never exists and
+            # BinnedObs dies on 'File not found: output/srcmap_03.fits'.
+            # Derive the list from the components actually produced.
+            import glob as _glob
+            _n = len(_glob.glob('output/srcmap_0*.fits'))
+            iteration_list = list(range(_n)) if _n else [0,1,2,3]
         for j in iteration_list:
 
             srcmap = 'output/srcmap_0%s.fits' %j

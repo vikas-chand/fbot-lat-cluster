@@ -382,7 +382,14 @@ class MakeStack(StackingAnalysis,Analyze):
                 counter = 0
 
                 j_counter = 0
-                for j in [0,1,2,3]:
+                # PATCH: was hardcoded [0,1,2,3] (Karwin's 4-way PSF0-3 JLA).
+                # A Principe et al. 2023 style analysis uses 3 ENERGY-band
+                # components, so component 3 never exists. Derive from the
+                # Likelihood_* directories actually present.
+                import glob as _glob
+                _ldirs = sorted(_glob.glob(os.path.join(self.home, "Stacked_Sources", "Likelihood_*")))
+                _js = [int(os.path.basename(d).split('_')[1]) for d in _ldirs] or [0,1,2,3]
+                for j in _js:
             
                     likelihood_dir = "Preprocessed_Sources/%s/output/null_likelihood_%s.txt" %(srcname,str(j))
                     likelihood_dir = os.path.join(likelihood_home,likelihood_dir)
