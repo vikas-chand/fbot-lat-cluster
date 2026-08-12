@@ -31,6 +31,61 @@ from astropy.io import fits
 from fermi_stacking.preprocessing.Preprocess import StackingAnalysis
 from fermi_stacking.analyze_results.AnalyzeResults import Analyze
 
+
+# PATCH (audit D03/D04, 2026-08-12): shared helpers for edisp + catalog freedom.
+def _fs_binned_config():
+    """Energy dispersion actually applied to the likelihood (D03).
+    Set FS_EDISP=0 to disable. The fermipy-side config alone does NOT
+    propagate to these pyLikelihood BinnedAnalysis objects."""
+    import os as _os
+    try:
+        from BinnedAnalysis import BinnedConfig as _BC
+    except Exception:
+        return None
+    if _os.environ.get('FS_EDISP', '1') == '0':
+        return None
+    return _BC(edisp_bins=-1)
+
+
+def _fs_free_nearby(like, xmlfile, skip=()):
+    """Optional Principe-style catalog freedom (D04): free the spectral
+    parameters of point sources within FS_FREE_RADIUS_DEG degrees of the
+    ROI centre. Unset/empty -> original behaviour (all catalog frozen)."""
+    import os as _os, math as _math, re as _re
+    rad = _os.environ.get('FS_FREE_RADIUS_DEG', '')
+    if not rad:
+        return
+    rad = float(rad)
+    txt = open(xmlfile).read()
+    ra0 = dec0 = None
+    m = _re.search(r'name="ROI".*?RA="([\d.+-]+)".*?DEC="([\d.+-]+)"', txt, _re.S)
+    srcs = {}
+    for sm in _re.finditer(r'<source[^>]*name="([^"]+)"(.*?)</source>', txt, _re.S):
+        nm, body = sm.group(1), sm.group(2)
+        pm = _re.search(r'name="RA"\s+value="([\d.+-]+)"', body)
+        qm = _re.search(r'name="DEC"\s+value="([\d.+-]+)"', body)
+        if pm and qm:
+            srcs[nm] = (float(pm.group(1)), float(qm.group(1)))
+    if not srcs:
+        return
+    # ROI centre: mean of source positions is unreliable; use env override,
+    # else the target position supplied by the caller via skip[0] lookup.
+    ra0 = float(_os.environ.get('FS_ROI_RA', 'nan'))
+    dec0 = float(_os.environ.get('FS_ROI_DEC', 'nan'))
+    if ra0 != ra0 or dec0 != dec0:
+        return
+    for nm, (ra, dec) in srcs.items():
+        if nm in skip:
+            continue
+        d = _math.hypot((ra - ra0) * _math.cos(_math.radians(dec0)), dec - dec0)
+        if d <= rad:
+            try:
+                spec = like.model[nm].funcs['Spectrum']
+                for pn in spec.paramNames:
+                    spec.getParam(pn).setFree(True)
+            except Exception:
+                pass
+
 class MakeStack(StackingAnalysis,Analyze):
 
     """Performs stacking."""
@@ -186,7 +241,9 @@ class MakeStack(StackingAnalysis,Analyze):
 				
                 Index+=['%.1f' %np.fabs(index[i])]
                 Flux+=['%.2e' %(10**flux[j])]
-                like1 = BinnedAnalysis(obs,'fit_model_3_0%s.xml' %PSF,optimizer='DRMNFB')
+                _cfg = _fs_binned_config()   # PATCH D03
+                like1 = BinnedAnalysis(obs,'fit_model_3_0%s.xml' %PSF,optimizer='DRMNFB',config=_cfg) if _cfg \
+                    else BinnedAnalysis(obs,'fit_model_3_0%s.xml' %PSF,optimizer='DRMNFB')
                 freeze=like1.freeze
                 for k in range(len(like1.model.params)):
                     freeze(k)
@@ -195,6 +252,7 @@ class MakeStack(StackingAnalysis,Analyze):
                 like1.model['galdiff'].funcs['Spectrum'].getParam('Prefactor').setFree(True)
                 like1.model['galdiff'].funcs['Spectrum'].getParam('Index').setFree(True)
                 like1.model['isodiff'].funcs['Spectrum'].getParam('Normalization').setFree(True)
+                _fs_free_nearby(like1, 'fit_model_3_0%s.xml' %PSF, skip=('galdiff','isodiff',srcname))  # PATCH D04
                 like1.model[srcname].funcs['Spectrum'].getParam('Integral').setValue(10**flux[j])
                 like1.model[srcname].funcs['Spectrum'].getParam('Index').setValue(index[i])
 	            
@@ -205,7 +263,8 @@ class MakeStack(StackingAnalysis,Analyze):
                 like1.logLike.writeXml('fit_1_%s.xml' %srcname)
 	                
                 #perform second likelihood fit with Minuit:
-                like2 = BinnedAnalysis(obs,'fit_1_%s.xml'%srcname,optimizer='MINUIT')
+                like2 = BinnedAnalysis(obs,'fit_1_%s.xml'%srcname,optimizer='MINUIT',config=_cfg) if _cfg \
+                    else BinnedAnalysis(obs,'fit_1_%s.xml'%srcname,optimizer='MINUIT')
 	            
                 like2.tol = 1e-8
                 like2.syncSrcParams()
@@ -213,7 +272,7 @@ class MakeStack(StackingAnalysis,Analyze):
                 like2.fit(verbosity=0,covar=True,optObject=likeobj)
                 Fit_Qual+=['%d' %likeobj.getQuality()]
                 Conv+=['%d' %likeobj.getRetCode()]
-                LOG_LIKE+=['%.2f' %like2.logLike.value()]
+                LOG_LIKE+=['%.10f' %like2.logLike.value()]   # PATCH D27: %.2f cost up to 0.78 TS
                 del like1, like2
 		
             output = '\n'.join('\t'.join(map(str,row)) for row in zip(Flux,Index,LOG_LIKE,Fit_Qual,Conv))
