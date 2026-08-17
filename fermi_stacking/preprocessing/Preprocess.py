@@ -439,8 +439,29 @@ class StackingAnalysis:
             yml.write("  galdiff : '%s'\n" %self.galdiff)
             yml.write("  isodiff : '%s'\n" %self.isodiff)
             yml.write("  catalogs :\n")
-            yml.write("    - '/Users/salim/Desktop/Projects/FXTs/FXT_Stack/gll_psc_v35.fit'\n")  # PATCH: 4FGL-DR4, matching the unbinned pipeline (Karwin had DR3)
-            yml.write("  extdir : '/Users/salim/anaconda3/envs/fermipy/lib/python3.9/site-packages/fermipy/data/catalogs/Extended_12years/'\n")
+            # PATCH: 4FGL-DR4, matching the unbinned pipeline (Karwin had DR3).
+            # Site-portable: run_task.py exports FS_CATALOG_4FGL / FS_EXTDIR from
+            # cluster_config.yaml. The fallbacks are the original development-machine
+            # paths, so behaviour on that machine is unchanged; the extdir fallback is
+            # resolved from the installed fermipy so it works in any conda env.
+            _cat4fgl = os.environ.get(
+                'FS_CATALOG_4FGL',
+                '/Users/salim/Desktop/Projects/FXTs/FXT_Stack/gll_psc_v35.fit')
+            _extdir = os.environ.get('FS_EXTDIR', '')
+            if not _extdir:
+                try:
+                    import fermipy as _fpy
+                    _extdir = os.path.join(os.path.dirname(_fpy.__file__), 'data',
+                                           'catalogs', 'Extended_12years') + os.sep
+                except Exception:
+                    _extdir = ('/Users/salim/anaconda3/envs/fermipy/lib/python3.9/'
+                               'site-packages/fermipy/data/catalogs/Extended_12years/')
+            if not os.path.isfile(_cat4fgl):
+                raise SystemExit(
+                    "4FGL catalog not found at %s. Set FS_CATALOG_4FGL (run_task.py "
+                    "does this from cluster_config.yaml: paths.catalog_4fgl)." % _cat4fgl)
+            yml.write("    - '%s'\n" % _cat4fgl)
+            yml.write("  extdir : '%s'\n" % _extdir)
             yml.write("  sources :\n")
             yml.write("    - { 'name' : '%s', 'ra' : %s, 'dec' : %s, 'SpectrumType' : PowerLaw }\n" %(srcname,ra,dec))
             yml.write("#--------#\n")
