@@ -18,29 +18,43 @@ except `cluster_config.yaml`.
 
 ## One-time setup on the cluster
 
+Operating instructions live in [`INSTRUCTIONS_FOR_PARTHA.md`](INSTRUCTIONS_FOR_PARTHA.md)
+(or `../README.md` for the short version); this file is the technical companion
+— what is baked in, and why. In brief:
+
 ```bash
-# 1. stage the tree (rsync from the Mac or a shared filesystem)
-rsync -a cluster/ Fermi_Stacking_Analysis/ sample/ refdata/ $CLUSTER:$CAMPAIGN_ROOT/
-#    refdata/ needs: gll_iem_v07.fits, iso_P8R3_SOURCE_V3_v1.txt,
-#    iso_P8R3_SOURCE_V3_PSF1_v1.txt, iso_P8R3_SOURCE_V3_PSF2_v1.txt, gll_psc_v35.fit
-#    (all ship with fermitools / the FSSC; copy from the local env's share dir)
+# 1. get the tree (one clone; nothing to rsync)
+git clone https://github.com/vikas-chand/fbot-lat-cluster.git $CAMPAIGN_ROOT
+cd $CAMPAIGN_ROOT
 
-# 2. environment
-conda env create -f environment.yml     # fermipy 1.3.1 + fermitools 2.2.0
+# 2. verify you have the modified pipeline and not upstream Karwin
+git log --oneline | grep 854d7b0
+#    NB: `git log -1` inside Fermi_Stacking_Analysis/ reports THIS repo's HEAD,
+#    not the fork's — the pipeline is vendored (git subtree), not a submodule.
+#    Provenance of a finished run is measured, not declared: every product
+#    carries a pipeline_sha256 (see provenance.py) that ingest checks against
+#    our own copy.
 
-# 3. verify the fork
-cd $CAMPAIGN_ROOT/Fermi_Stacking_Analysis && git log --oneline -1   # expect 24c84ee
+# 3. environment
+conda env create -f cluster/environment.yml   # fermipy 1.3.1 + fermitools 2.2.0
 
-# 4. edit cluster_config.yaml: campaign_root + confirm scope
+# 4. refdata: gll_iem_v07.fits, iso_P8R3_SOURCE_V3_v1.txt,
+#    iso_P8R3_SOURCE_V3_PSF{1,2}_v1.txt  -> copy from the env's share dir;
+#    gll_psc_v35.fit (4FGL-DR4) -> curl from the FSSC. Both in INSTRUCTIONS §3.
+
+# 5. edit cluster/cluster_config.yaml: campaign_root + confirm scope
 ```
 
 ## Data (audit D02 — do this FIRST, wherever bandwidth is good)
 
 ```bash
+# preferred: cut the cones from a local LAT weekly mirror (no bulk transfer)
+python make_cones_from_weekly.py --weekly /path/to/lat/weekly/photon \
+    --catalog ../sample/fbot_catalog_tiered.csv --outdir ../data/ft1_1tev --jobs 8
+
+# alternative: fetch fresh cones from the FSSC (needs outbound HTTPS)
 python download_ft1_1tev.py --catalog ../sample/fbot_catalog_tiered.csv \
     --outdir ../data/ft1_1tev            # ~14 events for G1/G2; checkpointed
-# then, if downloading at LSU but computing elsewhere:
-rsync -a ../data/ft1_1tev $CLUSTER:$CAMPAIGN_ROOT/data/
 ```
 The FT2 spacecraft file must also be staged to `data/ft2.fits`.
 
