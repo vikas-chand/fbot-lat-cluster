@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=fbot-binned
 #SBATCH --output=logs/%x_%A_%a.out
-#SBATCH --time=08:00:00
+#SBATCH --time=16:00:00        # tasks measure 8-10 h; 8 h killed most of them
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -13,7 +13,9 @@
 set -euo pipefail
 mkdir -p logs
 CONFIG=${CONFIG:-cluster_config.yaml}
-ENVNAME=$(python3 -c "import yaml;print(yaml.safe_load(open('$CONFIG'))['conda_env'])")
+# Read the env name WITHOUT needing python+PyYAML before the env exists: on many
+# clusters the stock python3 has no yaml and `set -e` would kill the job here.
+ENVNAME=$(sed -n 's/^conda_env:[[:space:]]*//p' "$CONFIG" | sed 's/#.*//; s/["'"'"'"'"'"']//g; s/[[:space:]]*$//')
 
 source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh
 conda activate "$ENVNAME"

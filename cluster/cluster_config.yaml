@@ -3,10 +3,12 @@
 #
 # Layout expected on the cluster:
 #   $CAMPAIGN_ROOT/
-#     cluster/            this package (rsync it whole)
-#     Fermi_Stacking_Analysis/   the patched fork, branch fbot-local @ 24c84ee
+#     cluster/            the campaign scripts (git clone gives you all of this)
+#     Fermi_Stacking_Analysis/   Karwin's pipeline, modified; see NOTICE
 #     sample/fbot_catalog_tiered.csv
-#     data/ft1_1tev/<EVENT>/*.fits          0.1-1000 GeV cones (download_ft1_1tev.py)
+#     data/ft1_1tev/<EVENT>/*.fits          0.1-1000 GeV cones
+#                                           (make_cones_from_weekly.py, or
+#                                            download_ft1_1tev.py from the FSSC)
 #     data/ft2.fits                          spacecraft file
 #     refdata/gll_iem_v07.fits, iso_P8R3_SOURCE_V3_v1.txt, iso_..._PSF{1,2}_v1.txt
 #     refdata/gll_psc_v35.fit                4FGL-DR4

@@ -2,7 +2,7 @@
 #PBS -N fbot-binned
 #PBS -j oe
 #PBS -o logs/
-#PBS -l walltime=08:00:00
+#PBS -l walltime=16:00:00      # tasks measure 8-10 h; 8 h killed most of them
 #PBS -l nodes=1:ppn=4
 # Array submission:  qsub -t 1-$(wc -l < tasks.txt)%20 submit_pbs.sh
 # (Karwin's own package targets PBS, so this wrapper mirrors his usage; use it
@@ -12,7 +12,9 @@ set -euo pipefail
 cd "$PBS_O_WORKDIR"
 mkdir -p logs
 CONFIG=${CONFIG:-cluster_config.yaml}
-ENVNAME=$(python3 -c "import yaml;print(yaml.safe_load(open('$CONFIG'))['conda_env'])")
+# Read the env name WITHOUT needing python+PyYAML before the env exists: on many
+# clusters the stock python3 has no yaml and `set -e` would kill the job here.
+ENVNAME=$(sed -n 's/^conda_env:[[:space:]]*//p' "$CONFIG" | sed 's/#.*//; s/["'"'"'"'"'"']//g; s/[[:space:]]*$//')
 
 source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh
 conda activate "$ENVNAME"
