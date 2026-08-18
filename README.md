@@ -18,7 +18,7 @@ Questions: Salim (vikas.chand.physics@gmail.com).
 ## Quickstart
 
 ```bash
-git clone <this-repo-url> FBOTs_LAT
+git clone https://github.com/vikas-chand/fbot-lat-cluster.git FBOTs_LAT
 cd FBOTs_LAT
 
 # 1. Verify you have the modified pipeline, not upstream (see Provenance below)

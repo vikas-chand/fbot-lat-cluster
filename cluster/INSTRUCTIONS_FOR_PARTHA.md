@@ -2,7 +2,7 @@
 
 Hi Partha,
 
-Thanks for running this. Below is everything from unpacking to sending results
+Thanks for running this. Below is everything from cloning to sending results
 back. It is written so no step needs guessing; if anything still does, message
 Salim (vikas.chand.physics@gmail.com).
 
@@ -14,30 +14,39 @@ likelihood analysis of one event in one post- or pre-discovery time window
 (10⁵, 10⁶, or 10⁷ s), in the configuration of Principe et al. 2023 (three
 jointly fitted energy-dependent event-type components), scanned over a
 2D grid of flux × photon index, using Chris Karwin's public `fermi_stacking`
-pipeline with three small, documented local commits. Your cluster runs the
+pipeline with four small, documented local commits. Your cluster runs the
 per-event scans; the cross-event stacking and all interpretation happen back
 here. Everything is a null result so far — the science is in the depth of the
 upper limits, which is why the configuration details below matter.
 
-## 2. What you received
+## 2. Getting it
 
-`fbot_cluster_package.tar.gz` (≈4 MB):
+Everything is in one private repository — no tarball, nothing to unpack:
+
+```bash
+git clone https://github.com/vikas-chand/fbot-lat-cluster.git FBOTs_LAT
+cd FBOTs_LAT
+```
 
 ```
 cluster/                     the campaign scripts (this file lives here too)
-Fermi_Stacking_Analysis/     Karwin's pipeline, git branch fbot-local
+Fermi_Stacking_Analysis/     Karwin's pipeline, MODIFIED (see NOTICE + patches/)
 sample/fbot_catalog_tiered.csv
-README_FIRST.md              condensed version of this document
+README.md                    quickstart; this file is the full version
 ```
 
-First thing after unpacking — verify the pipeline version:
+First thing after cloning — verify you have the modified pipeline and not
+upstream:
 
 ```bash
-cd Fermi_Stacking_Analysis && git log --oneline -1
+git log --oneline | grep 854d7b0
 # must print: 854d7b0  Portability: resolve 4FGL catalog and extdir ...
 ```
 
-If it prints anything else, stop and tell Salim.
+If it prints nothing, stop and tell Salim. Upstream Karwin will not run this
+campaign: it hardcodes another machine's absolute paths into every fermipy
+config, and it lacks the configuration fixes the adopted numbers depend on.
+The full diff against upstream is in `patches/fbot-local-vs-upstream.patch`.
 
 ## 3. Prerequisites
 
