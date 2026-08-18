@@ -61,6 +61,13 @@ UNBINNED_SEAM = ROOT / 'proper_stacking' / 'output_v2' / 'stacking_results.csv'
 
 def load_unbinned_seam():
     import csv
+    if not UNBINNED_SEAM.is_file():
+        # The seam reference lives in the analysis project, not in the cluster
+        # repo. Run this script from the project copy; the clone cannot validate.
+        print(f'  seam reference not found: {UNBINNED_SEAM}\n'
+              f'  -> run ingest from the FBOTs_LAT project copy, which has '
+              f'proper_stacking/', file=sys.stderr)
+        return None
     for r in csv.DictReader(open(UNBINNED_SEAM)):
         if r['window'] == 'post_100ks' and r['group'] == 'G1':
             return float(r['ul95_erg'])
