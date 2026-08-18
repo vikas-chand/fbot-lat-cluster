@@ -15,6 +15,9 @@ configuration details are not negotiable.
 
 Questions: Salim (vikas.chand.physics@gmail.com).
 
+> **Running this on a cluster? Start with [`README_FIRST.md`](README_FIRST.md)** —
+> the whole job on one page. This file is orientation; that one is the procedure.
+
 ---
 
 ## Quickstart
