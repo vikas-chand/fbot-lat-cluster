@@ -34,6 +34,8 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+import provenance
+
 IDX = np.round(np.arange(1.0, 4.01, 0.1), 1)
 FLUX = np.logspace(-11, -3, 80)            # 0.1-1000 GeV integral photon flux
 ERG_PER_GEV = 1.602e-3
@@ -99,7 +101,7 @@ def main():
            'ul_drop': 2.71,
            'flux_axis': 'integral photon flux 0.1-1000 GeV, logspace(-11,-3,80)',
            'stack_ts_max': float(stack.max()),
-           'producer': 'cluster/collect_stack.py', 'fork_commit': '24c84ee'}
+           'producer': 'cluster/collect_stack.py', **provenance.fingerprint()}
     for g in (1.5, 2.0, 2.5):
         k = int(np.argmin(abs(IDX - g)))
         u = ul_ts(stack[k])

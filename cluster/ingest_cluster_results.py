@@ -38,7 +38,23 @@ ROOT = HERE.parent
 WINDOWS = ['post_100ks', 'post_1e6', 'post_1e7', 'pre_100ks', 'pre_1e6', 'pre_1e7']
 EXPECTED_TASKS = 84
 EXPECTED_SHAPE = (31, 80)
-FORK_COMMIT = '24c84ee'
+# Provenance is compared MEASURED-vs-MEASURED: the hash the cluster stamped into
+# its products, against the hash of the pipeline sitting in this repo. The old
+# check compared a hardcoded literal with the identical literal in run_task.py
+# and so could only ever pass. (--pipeline overrides which copy is authoritative.)
+def _local_pipeline():
+    # This file is shared by two trees: the cluster repo (pipeline at the root)
+    # and the working project (pipeline under binned_crosscheck/).
+    if os.environ.get('FS_PIPELINE_DIR'):
+        return Path(os.environ['FS_PIPELINE_DIR'])
+    for cand in (ROOT / 'Fermi_Stacking_Analysis' / 'fermi_stacking',
+                 ROOT / 'binned_crosscheck' / 'Fermi_Stacking_Analysis' / 'fermi_stacking'):
+        if cand.is_dir():
+            return cand
+    return ROOT / 'Fermi_Stacking_Analysis' / 'fermi_stacking'   # for the message
+
+
+LOCAL_PIPELINE = _local_pipeline()
 # our unbinned stack at the seam window, 0.1-100 GeV energy flux (erg/cm2/s)
 UNBINNED_SEAM = ROOT / 'proper_stacking' / 'output_v2' / 'stacking_results.csv'
 
@@ -83,13 +99,21 @@ def main():
     commits, emaxes, edisps, freerad, windows_seen = set(), set(), set(), set(), {}
     for m in metas:
         d = json.load(open(m))
-        commits.add(str(d.get('fork_commit')))
+        commits.add(str(d.get('pipeline_sha256')))
         emaxes.add(float(d.get('emax_mev', -1)))
         edisps.add(str(d.get('edisp')))
         freerad.add(float(d.get('free_radius_deg', -1)))
         windows_seen[d.get('window')] = windows_seen.get(d.get('window'), 0) + 1
-    check('single fork commit', commits == {FORK_COMMIT},
-          f'commits recorded: {sorted(commits)} (expect {{{FORK_COMMIT}}})')
+    expected = None
+    if LOCAL_PIPELINE.is_dir():
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import provenance
+        expected = provenance.pipeline_sha256(LOCAL_PIPELINE)
+    check('one pipeline, and it is ours',
+          len(commits) == 1 and expected is not None and commits == {expected},
+          f'products stamped {sorted(c[:12] for c in commits)}; '
+          f'our copy hashes to {(expected or "UNAVAILABLE")[:12]}'
+          + ('' if expected else ' — local pipeline not found, cannot verify'))
     check('1 TeV analysis band', emaxes == {1000000.0},
           f'emax_mev values: {sorted(emaxes)}')
     check('energy dispersion on', edisps == {'1'},

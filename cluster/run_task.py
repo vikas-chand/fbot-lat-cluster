@@ -11,6 +11,9 @@ Audit fixes active (see Fermi_Stacking_Analysis git log, commit 24c84ee):
   D04  Principe 2-deg catalog freedom (FS_FREE_RADIUS_DEG + FS_ROI_RA/DEC).
   D27  full-precision scan output (in the fork).
 
+Provenance is MEASURED from the imported pipeline (cluster/provenance.py), not
+declared as a literal — see that module for why.
+
 Usage (called by the array wrappers; also runnable by hand):
     python run_task.py --config cluster_config.yaml --event AT2018cow --window post_1e6
 Exit codes: 0 ok, 3 no-data/zero-exposure skip (recorded), 1 real failure.
@@ -38,6 +41,9 @@ PRINCIPE_COMPONENTS = [
     "  - { model: {isodiff: iso_P8R3_SOURCE_V3_v1.txt},\n"
     "      selection : { emin: 1000, emax: %EMAX%,  zmax: 105, evtype : 63 } }\n",
 ]
+
+
+import provenance
 
 
 def load_cfg(path):
@@ -200,7 +206,7 @@ ROI_radius: {cfg['analysis']['roi_radius_deg']}
     meta = dict(event=a.event, window=a.window, tmin=tmin, tmax=tmax,
                 emax_mev=emax, edisp=os.environ['FS_EDISP'],
                 free_radius_deg=fr, ncomp=ncomp,
-                fork_commit='24c84ee')
+                **provenance.fingerprint())
     (rundir / 'task_meta.json').write_text(json.dumps(meta, indent=2))
     print(f"DONE {a.event} {a.window}")
     return 0

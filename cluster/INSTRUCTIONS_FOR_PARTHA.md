@@ -14,10 +14,17 @@ likelihood analysis of one event in one post- or pre-discovery time window
 (10⁵, 10⁶, or 10⁷ s), in the configuration of Principe et al. 2023 (three
 jointly fitted energy-dependent event-type components), scanned over a
 2D grid of flux × photon index, using Chris Karwin's public `fermi_stacking`
-pipeline with four small, documented local commits. Your cluster runs the
-per-event scans; the cross-event stacking and all interpretation happen back
-here. Everything is a null result so far — the science is in the depth of the
-upper limits, which is why the configuration details below matter.
+pipeline with four small, documented local commits.
+
+**Your cluster runs all three computing stages**: preprocessing, the 84
+per-event likelihood scans (the expensive part), and then the cross-event stack
+itself — `collect_stack.py`, six windows, section 6. What happens back here is
+validation and interpretation: the 10⁵ s seam check against our unbinned stack,
+and the manuscript numbers. So please do run section 6; the stacked surfaces,
+not the per-event arrays, are what we need back.
+
+Everything is a null result so far — the science is in the depth of the upper
+limits, which is why the configuration details below matter.
 
 ## 2. Getting it
 

@@ -6,9 +6,11 @@ post- or pre-discovery time window (10⁵, 10⁶, 10⁷ s) in the configuration 
 Principe et al. (2023) — three jointly fitted, energy-dependent event-type
 components — scanned over a 2D grid of flux × photon index. **84 tasks.**
 
-The cluster runs the per-event scans. Cross-event stacking and all
-interpretation happen back at the home institution. Results so far are nulls,
-so the science is in the *depth* of the upper limits — which is why the
+The cluster runs **all three computing stages**: preprocessing, the 84 per-event
+likelihood scans, and the cross-event stack (`collect_stack.py`, six windows).
+Validation and interpretation happen at the home institution — the 10⁵ s seam
+check against the unbinned stack, and the manuscript numbers. Results so far are
+nulls, so the science is in the *depth* of the upper limits — which is why the
 configuration details are not negotiable.
 
 Questions: Salim (vikas.chand.physics@gmail.com).
