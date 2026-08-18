@@ -1,0 +1,15 @@
+# Campaign inputs and outputs never belong in the repo.
+data/
+runs/
+refdata/
+cluster/logs/
+cluster/tasks.txt
+*.npy
+*.npz
+# Local-only launchers (this repo is the cluster configuration)
+cluster/cluster_config_local.yaml
+cluster/run_local_campaign*.sh
+# Junk
+__pycache__/
+*.pyc
+.DS_Store

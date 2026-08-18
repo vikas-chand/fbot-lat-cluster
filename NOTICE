@@ -1,0 +1,27 @@
+This repository redistributes a MODIFIED copy of:
+
+    Fermi_Stacking_Analysis  (fermi_stacking)
+    Copyright Chris Karwin and contributors
+    https://github.com/ckarwin/Fermi_Stacking_Analysis
+    Licensed under the Apache License, Version 2.0
+
+The copy lives in Fermi_Stacking_Analysis/ and is licensed to you under the
+same Apache License 2.0, whose full text is retained at
+Fermi_Stacking_Analysis/LICENSE.
+
+CHANGES MADE (Apache-2.0 section 4(b)). Our copy branches from upstream commit
+a1ec92265c2ac4bba38f3cc67fa79c0f379d3cd2 and adds four commits on the branch
+`fbot-local`, touching three files (+168/-16 lines):
+
+  bc6ec7d  FBOT local fixes: portability + custom component schemes
+  2d6a684  Modernise for the versions actually installed (pandas 2.3.3, Python 3.9+)
+  24c84ee  Audit fixes D03/D04/D27: real edisp, optional catalog freedom, full precision
+  854d7b0  Portability: resolve 4FGL catalog and extdir from the environment
+
+The complete diff against upstream is kept, readable, at
+patches/fbot-local-vs-upstream.patch. The commits themselves are preserved in
+this repository's history (they were imported with `git subtree`, so
+`git log --oneline` shows them with their original hashes).
+
+None of these changes are redistributed as upstream's work, and no endorsement
+by the upstream authors is implied.

@@ -1,0 +1,322 @@
+diff --git a/fermi_stacking/preprocessing/Preprocess.py b/fermi_stacking/preprocessing/Preprocess.py
+index 872a5ac..a012599 100755
+--- a/fermi_stacking/preprocessing/Preprocess.py
++++ b/fermi_stacking/preprocessing/Preprocess.py
+@@ -45,6 +45,61 @@ from astropy.io import fits
+ #######################################
+ 
+ # Superclass:
++
++# PATCH (audit D03/D04, 2026-08-12): shared helpers for edisp + catalog freedom.
++def _fs_binned_config():
++    """Energy dispersion actually applied to the likelihood (D03).
++    Set FS_EDISP=0 to disable. The fermipy-side config alone does NOT
++    propagate to these pyLikelihood BinnedAnalysis objects."""
++    import os as _os
++    try:
++        from BinnedAnalysis import BinnedConfig as _BC
++    except Exception:
++        return None
++    if _os.environ.get('FS_EDISP', '1') == '0':
++        return None
++    return _BC(edisp_bins=-1)
++
++
++def _fs_free_nearby(like, xmlfile, skip=()):
++    """Optional Principe-style catalog freedom (D04): free the spectral
++    parameters of point sources within FS_FREE_RADIUS_DEG degrees of the
++    ROI centre. Unset/empty -> original behaviour (all catalog frozen)."""
++    import os as _os, math as _math, re as _re
++    rad = _os.environ.get('FS_FREE_RADIUS_DEG', '')
++    if not rad:
++        return
++    rad = float(rad)
++    txt = open(xmlfile).read()
++    ra0 = dec0 = None
++    m = _re.search(r'name="ROI".*?RA="([\d.+-]+)".*?DEC="([\d.+-]+)"', txt, _re.S)
++    srcs = {}
++    for sm in _re.finditer(r'<source[^>]*name="([^"]+)"(.*?)</source>', txt, _re.S):
++        nm, body = sm.group(1), sm.group(2)
++        pm = _re.search(r'name="RA"\s+value="([\d.+-]+)"', body)
++        qm = _re.search(r'name="DEC"\s+value="([\d.+-]+)"', body)
++        if pm and qm:
++            srcs[nm] = (float(pm.group(1)), float(qm.group(1)))
++    if not srcs:
++        return
++    # ROI centre: mean of source positions is unreliable; use env override,
++    # else the target position supplied by the caller via skip[0] lookup.
++    ra0 = float(_os.environ.get('FS_ROI_RA', 'nan'))
++    dec0 = float(_os.environ.get('FS_ROI_DEC', 'nan'))
++    if ra0 != ra0 or dec0 != dec0:
++        return
++    for nm, (ra, dec) in srcs.items():
++        if nm in skip:
++            continue
++        d = _math.hypot((ra - ra0) * _math.cos(_math.radians(dec0)), dec - dec0)
++        if d <= rad:
++            try:
++                spec = like.model[nm].funcs['Spectrum']
++                for pn in spec.paramNames:
++                    spec.getParam(pn).setFree(True)
++            except Exception:
++                pass
++
+ class StackingAnalysis:
+    
+     """Superclass for conducting Fermi-LAT stacking.
+@@ -230,7 +285,7 @@ class StackingAnalysis:
+             self.sample_name_list = df[self.column_name].tolist()
+ 
+         if self.file_type == "tab":
+-            df = pd.read_csv(self.sample_file, delim_whitespace=True)
++            df = pd.read_csv(self.sample_file, sep=r'\s+')
+             self.sample_name_list = df[self.column_name].tolist()
+ 
+         # Science Tools:
+@@ -357,8 +412,8 @@ class StackingAnalysis:
+                 yml.write("  ltcube : '%s'\n" %self.ltcube)
+             yml.write("#--------#\n")
+             yml.write("binning:\n")
+-            yml.write("  roiwidth : 10\n")
+-            yml.write("  binsz : 0.08\n")
++            yml.write("  roiwidth : 20\n")   # PATCH: 10 deg RADIUS (Principe 2023 / our unbinned); Karwin had 10 = 5 deg radius
++            yml.write("  binsz : 0.1\n")     # PATCH: Principe 2023 pixel size
+             yml.write("  binsperdec : 8\n")
+             yml.write("#--------#\n")
+             yml.write("selection:\n")
+@@ -384,8 +439,29 @@ class StackingAnalysis:
+             yml.write("  galdiff : '%s'\n" %self.galdiff)
+             yml.write("  isodiff : '%s'\n" %self.isodiff)
+             yml.write("  catalogs :\n")
+-            yml.write("    - '4FGL-DR3'\n")
+-            yml.write("  extdir : '/zfs/astrohe/Software/fermipy_source/lib/python3.9/site-packages/fermipy-1.1.3+2.g21485-py3.9.egg/fermipy/data/catalogs/Extended_12years/'\n")
++            # PATCH: 4FGL-DR4, matching the unbinned pipeline (Karwin had DR3).
++            # Site-portable: run_task.py exports FS_CATALOG_4FGL / FS_EXTDIR from
++            # cluster_config.yaml. The fallbacks are the original development-machine
++            # paths, so behaviour on that machine is unchanged; the extdir fallback is
++            # resolved from the installed fermipy so it works in any conda env.
++            _cat4fgl = os.environ.get(
++                'FS_CATALOG_4FGL',
++                '/Users/salim/Desktop/Projects/FXTs/FXT_Stack/gll_psc_v35.fit')
++            _extdir = os.environ.get('FS_EXTDIR', '')
++            if not _extdir:
++                try:
++                    import fermipy as _fpy
++                    _extdir = os.path.join(os.path.dirname(_fpy.__file__), 'data',
++                                           'catalogs', 'Extended_12years') + os.sep
++                except Exception:
++                    _extdir = ('/Users/salim/anaconda3/envs/fermipy/lib/python3.9/'
++                               'site-packages/fermipy/data/catalogs/Extended_12years/')
++            if not os.path.isfile(_cat4fgl):
++                raise SystemExit(
++                    "4FGL catalog not found at %s. Set FS_CATALOG_4FGL (run_task.py "
++                    "does this from cluster_config.yaml: paths.catalog_4fgl)." % _cat4fgl)
++            yml.write("    - '%s'\n" % _cat4fgl)
++            yml.write("  extdir : '%s'\n" % _extdir)
+             yml.write("  sources :\n")
+             yml.write("    - { 'name' : '%s', 'ra' : %s, 'dec' : %s, 'SpectrumType' : PowerLaw }\n" %(srcname,ra,dec))
+             yml.write("#--------#\n")
+@@ -542,7 +618,14 @@ class StackingAnalysis:
+         if self.JLA == False:
+             iteration_list = [0]
+         if self.JLA == True:
+-            iteration_list = [0,1,2,3]
++            # PATCH: Karwin hardcoded [0,1,2,3] because his JLA is always the
++            # 4-way PSF0-3 split. A Principe et al. 2023 style analysis splits
++            # into 3 ENERGY bands instead, so srcmap_03 never exists and
++            # BinnedObs dies on 'File not found: output/srcmap_03.fits'.
++            # Derive the list from the components actually produced.
++            import glob as _glob
++            _n = len(_glob.glob('output/srcmap_0*.fits'))
++            iteration_list = list(range(_n)) if _n else [0,1,2,3]
+         for j in iteration_list:
+ 
+             srcmap = 'output/srcmap_0%s.fits' %j
+@@ -559,7 +642,9 @@ class StackingAnalysis:
+                     sys.exit()
+ 
+             obs = BinnedObs(srcMaps=srcmap,expCube=self.ltcube,binnedExpMap=bexpmap,irfs='%s' %self.irfs)
+-            like = BinnedAnalysis(obs,xmlfile,optimizer='Minuit') 
++            _cfg = _fs_binned_config()   # PATCH D03: edisp in the actual likelihood
++            like = BinnedAnalysis(obs,xmlfile,optimizer='Minuit',config=_cfg) if _cfg \
++                else BinnedAnalysis(obs,xmlfile,optimizer='Minuit')
+             like.deleteSource(srcname)
+             freeze=like.freeze
+             for k in range(len(like.model.params)):
+@@ -567,6 +652,7 @@ class StackingAnalysis:
+             like.model['galdiff'].funcs['Spectrum'].getParam('Prefactor').setFree(True)
+             like.model['galdiff'].funcs['Spectrum'].getParam('Index').setFree(True)
+             like.model['isodiff'].funcs['Spectrum'].getParam('Normalization').setFree(True)
++            _fs_free_nearby(like, xmlfile, skip=('galdiff','isodiff'))   # PATCH D04
+             likeobj = pyLike.Minuit(like.logLike)
+             thisL = like.fit(verbosity=1,covar=True,optObject=likeobj) #this returns -logL
+             value = like.logLike.value() #this returns logL
+@@ -626,7 +712,7 @@ class StackingAnalysis:
+ 		
+             if os.path.exists(wdir) == True:
+                 this_file = wdir
+-                df = pd.read_csv(this_file,sep='\s+',names=["name","dist_sep","flux","flux_err","index","index_err","flux_ul","TS"])
++                df = pd.read_csv(this_file,sep=r'\s+',names=["name","dist_sep","flux","flux_err","index","index_err","flux_ul","TS"])
+                 df_full = pd.concat([df,df_full]).reset_index(drop=True)
+ 
+         df_full = df_full.sort_values(by=["TS"],ascending=False).reset_index(drop=True)
+diff --git a/fermi_stacking/stacking/Stack.py b/fermi_stacking/stacking/Stack.py
+index 4dab7f3..18d8fe8 100755
+--- a/fermi_stacking/stacking/Stack.py
++++ b/fermi_stacking/stacking/Stack.py
+@@ -31,6 +31,61 @@ from astropy.io import fits
+ from fermi_stacking.preprocessing.Preprocess import StackingAnalysis
+ from fermi_stacking.analyze_results.AnalyzeResults import Analyze
+ 
++
++# PATCH (audit D03/D04, 2026-08-12): shared helpers for edisp + catalog freedom.
++def _fs_binned_config():
++    """Energy dispersion actually applied to the likelihood (D03).
++    Set FS_EDISP=0 to disable. The fermipy-side config alone does NOT
++    propagate to these pyLikelihood BinnedAnalysis objects."""
++    import os as _os
++    try:
++        from BinnedAnalysis import BinnedConfig as _BC
++    except Exception:
++        return None
++    if _os.environ.get('FS_EDISP', '1') == '0':
++        return None
++    return _BC(edisp_bins=-1)
++
++
++def _fs_free_nearby(like, xmlfile, skip=()):
++    """Optional Principe-style catalog freedom (D04): free the spectral
++    parameters of point sources within FS_FREE_RADIUS_DEG degrees of the
++    ROI centre. Unset/empty -> original behaviour (all catalog frozen)."""
++    import os as _os, math as _math, re as _re
++    rad = _os.environ.get('FS_FREE_RADIUS_DEG', '')
++    if not rad:
++        return
++    rad = float(rad)
++    txt = open(xmlfile).read()
++    ra0 = dec0 = None
++    m = _re.search(r'name="ROI".*?RA="([\d.+-]+)".*?DEC="([\d.+-]+)"', txt, _re.S)
++    srcs = {}
++    for sm in _re.finditer(r'<source[^>]*name="([^"]+)"(.*?)</source>', txt, _re.S):
++        nm, body = sm.group(1), sm.group(2)
++        pm = _re.search(r'name="RA"\s+value="([\d.+-]+)"', body)
++        qm = _re.search(r'name="DEC"\s+value="([\d.+-]+)"', body)
++        if pm and qm:
++            srcs[nm] = (float(pm.group(1)), float(qm.group(1)))
++    if not srcs:
++        return
++    # ROI centre: mean of source positions is unreliable; use env override,
++    # else the target position supplied by the caller via skip[0] lookup.
++    ra0 = float(_os.environ.get('FS_ROI_RA', 'nan'))
++    dec0 = float(_os.environ.get('FS_ROI_DEC', 'nan'))
++    if ra0 != ra0 or dec0 != dec0:
++        return
++    for nm, (ra, dec) in srcs.items():
++        if nm in skip:
++            continue
++        d = _math.hypot((ra - ra0) * _math.cos(_math.radians(dec0)), dec - dec0)
++        if d <= rad:
++            try:
++                spec = like.model[nm].funcs['Spectrum']
++                for pn in spec.paramNames:
++                    spec.getParam(pn).setFree(True)
++            except Exception:
++                pass
++
+ class MakeStack(StackingAnalysis,Analyze):
+ 
+     """Performs stacking."""
+@@ -186,7 +241,9 @@ class MakeStack(StackingAnalysis,Analyze):
+ 				
+                 Index+=['%.1f' %np.fabs(index[i])]
+                 Flux+=['%.2e' %(10**flux[j])]
+-                like1 = BinnedAnalysis(obs,'fit_model_3_0%s.xml' %PSF,optimizer='DRMNFB')
++                _cfg = _fs_binned_config()   # PATCH D03
++                like1 = BinnedAnalysis(obs,'fit_model_3_0%s.xml' %PSF,optimizer='DRMNFB',config=_cfg) if _cfg \
++                    else BinnedAnalysis(obs,'fit_model_3_0%s.xml' %PSF,optimizer='DRMNFB')
+                 freeze=like1.freeze
+                 for k in range(len(like1.model.params)):
+                     freeze(k)
+@@ -195,6 +252,7 @@ class MakeStack(StackingAnalysis,Analyze):
+                 like1.model['galdiff'].funcs['Spectrum'].getParam('Prefactor').setFree(True)
+                 like1.model['galdiff'].funcs['Spectrum'].getParam('Index').setFree(True)
+                 like1.model['isodiff'].funcs['Spectrum'].getParam('Normalization').setFree(True)
++                _fs_free_nearby(like1, 'fit_model_3_0%s.xml' %PSF, skip=('galdiff','isodiff',srcname))  # PATCH D04
+                 like1.model[srcname].funcs['Spectrum'].getParam('Integral').setValue(10**flux[j])
+                 like1.model[srcname].funcs['Spectrum'].getParam('Index').setValue(index[i])
+ 	            
+@@ -205,7 +263,8 @@ class MakeStack(StackingAnalysis,Analyze):
+                 like1.logLike.writeXml('fit_1_%s.xml' %srcname)
+ 	                
+                 #perform second likelihood fit with Minuit:
+-                like2 = BinnedAnalysis(obs,'fit_1_%s.xml'%srcname,optimizer='MINUIT')
++                like2 = BinnedAnalysis(obs,'fit_1_%s.xml'%srcname,optimizer='MINUIT',config=_cfg) if _cfg \
++                    else BinnedAnalysis(obs,'fit_1_%s.xml'%srcname,optimizer='MINUIT')
+ 	            
+                 like2.tol = 1e-8
+                 like2.syncSrcParams()
+@@ -213,7 +272,7 @@ class MakeStack(StackingAnalysis,Analyze):
+                 like2.fit(verbosity=0,covar=True,optObject=likeobj)
+                 Fit_Qual+=['%d' %likeobj.getQuality()]
+                 Conv+=['%d' %likeobj.getRetCode()]
+-                LOG_LIKE+=['%.2f' %like2.logLike.value()]
++                LOG_LIKE+=['%.10f' %like2.logLike.value()]   # PATCH D27: %.2f cost up to 0.78 TS
+                 del like1, like2
+ 		
+             output = '\n'.join('\t'.join(map(str,row)) for row in zip(Flux,Index,LOG_LIKE,Fit_Qual,Conv))
+@@ -332,7 +391,7 @@ class MakeStack(StackingAnalysis,Analyze):
+                         this_index = str(index_list[i])
+                         this_file = "%s_stacking_%s.txt" %(srcname,this_index)
+ 
+-                        df = pd.read_csv(this_file,sep='\s+',names=["flux","index","likelihood","quality","status"])
++                        df = pd.read_csv(this_file,sep=r'\s+',names=["flux","index","likelihood","quality","status"])
+ 
+                         flux = df["flux"]
+                         index = df["index"]
+@@ -382,7 +441,14 @@ class MakeStack(StackingAnalysis,Analyze):
+                 counter = 0
+ 
+                 j_counter = 0
+-                for j in [0,1,2,3]:
++                # PATCH: was hardcoded [0,1,2,3] (Karwin's 4-way PSF0-3 JLA).
++                # A Principe et al. 2023 style analysis uses 3 ENERGY-band
++                # components, so component 3 never exists. Derive from the
++                # Likelihood_* directories actually present.
++                import glob as _glob
++                _ldirs = sorted(_glob.glob(os.path.join(self.home, "Stacked_Sources", "Likelihood_*")))
++                _js = [int(os.path.basename(d).split('_')[1]) for d in _ldirs] or [0,1,2,3]
++                for j in _js:
+             
+                     likelihood_dir = "Preprocessed_Sources/%s/output/null_likelihood_%s.txt" %(srcname,str(j))
+                     likelihood_dir = os.path.join(likelihood_home,likelihood_dir)
+@@ -418,7 +484,7 @@ class MakeStack(StackingAnalysis,Analyze):
+                             this_index = str(index_list[i])
+                             this_file = "%s_stacking_%s.txt" %(srcname,this_index)
+                         
+-                            df = pd.read_csv(this_file,sep='\s+',names=["flux","index","likelihood","quality","status"])
++                            df = pd.read_csv(this_file,sep=r'\s+',names=["flux","index","likelihood","quality","status"])
+                         
+                             flux = df["flux"]
+                             index = df["index"]
+@@ -503,7 +569,7 @@ class MakeStack(StackingAnalysis,Analyze):
+ 
+         name_file = os.path.join(preprocess_home, "Preprocessed_Sources", 
+                 "preprocessing_summary_" + self.run_name + ".txt")
+-        df = pd.read_csv(name_file,sep='\s+',skiprows=skip_rows)
++        df = pd.read_csv(name_file,sep=r'\s+',skiprows=skip_rows)
+         name_list = df["name"]
+         ts_list = df["TS"]
+ 
+diff --git a/fermi_stacking/submit_fermi_stacking_jobs.py b/fermi_stacking/submit_fermi_stacking_jobs.py
+index b4f54e8..95e6bda 100644
+--- a/fermi_stacking/submit_fermi_stacking_jobs.py
++++ b/fermi_stacking/submit_fermi_stacking_jobs.py
+@@ -42,7 +42,7 @@ if file_type == "csv":
+     dec_list = df[column_dec].tolist()
+ 
+ if file_type == "tab":
+-    df = pd.read_csv(this_file, delim_whitespace=True)
++    df = pd.read_csv(this_file, sep=r'\s+')
+     name_list = df[column_name].tolist()
+     ra_list = df[column_ra].tolist()
+     dec_list = df[column_dec].tolist()

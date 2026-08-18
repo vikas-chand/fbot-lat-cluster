@@ -1,0 +1,12 @@
+# fermipy environment for the FBOT binned campaign (matches the validated Mac env)
+name: fermipy
+channels: [conda-forge, fermi]
+dependencies:
+  - python=3.9
+  - fermitools=2.2.0
+  - fermipy=1.3.1
+  - numpy=1.26
+  - astropy
+  - pandas>=2
+  - pyyaml
+  - requests

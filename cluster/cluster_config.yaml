@@ -1,0 +1,40 @@
+# FBOT binned campaign — single place for every site-specific path.
+# Edit THIS FILE on each cluster; no script below hardcodes a path.
+#
+# Layout expected on the cluster:
+#   $CAMPAIGN_ROOT/
+#     cluster/            this package (rsync it whole)
+#     Fermi_Stacking_Analysis/   the patched fork, branch fbot-local @ 24c84ee
+#     sample/fbot_catalog_tiered.csv
+#     data/ft1_1tev/<EVENT>/*.fits          0.1-1000 GeV cones (download_ft1_1tev.py)
+#     data/ft2.fits                          spacecraft file
+#     refdata/gll_iem_v07.fits, iso_P8R3_SOURCE_V3_v1.txt, iso_..._PSF{1,2}_v1.txt
+#     refdata/gll_psc_v35.fit                4FGL-DR4
+#     runs/                                  outputs (one dir per event_window)
+
+campaign_root: /work/CHANGE_ME/FBOTs_LAT        # absolute path on the cluster
+conda_env: fermipy                              # env from environment.yml
+
+paths:
+  catalog:   "{campaign_root}/sample/fbot_catalog_tiered.csv"
+  ft1_tree:  "{campaign_root}/data/ft1_1tev"    # ONE tree, 1 TeV cones (D02)
+  ft2:       "{campaign_root}/data/ft2.fits"
+  galdiff:   "{campaign_root}/refdata/gll_iem_v07.fits"
+  isodiff:   "{campaign_root}/refdata/iso_P8R3_SOURCE_V3_v1.txt"
+  catalog_4fgl: "{campaign_root}/refdata/gll_psc_v35.fit"
+  karwin:    "{campaign_root}/Fermi_Stacking_Analysis"
+  outdir:    "{campaign_root}/runs"
+
+analysis:
+  # Principe et al. 2023 configuration; audited values
+  emin_mev: 100.0
+  emax_mev: 1000000.0          # REQUIRES the 1 TeV data tree (audit D02)
+  roi_radius_deg: 10.0
+  # audit D04: catalog-source spectral freedom radius (Principe: 2.0).
+  # Set to 0 to reproduce Karwin's freeze-all behaviour instead.
+  free_radius_deg: 2.0
+  edisp: true                  # audit D03; propagated as FS_EDISP
+
+scope:
+  tiers: [G1, G2]
+  windows: [post_100ks, post_1e6, post_1e7, pre_100ks, pre_1e6, pre_1e7]
