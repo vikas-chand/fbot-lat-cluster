@@ -18,6 +18,12 @@ The selection replicates the FSSC query used for this campaign:
 No event-class or event-type cut is applied here; those are applied downstream
 per component by the Principe configuration, exactly as with the FSSC cones.
 
+Speed: gtselect is handed only the weekly files whose [TSTART, TSTOP] overlaps
+the event's window (~33 weeks of the ~880-week mission), instead of the whole
+mirror. gtselect's own time cut is unchanged, so the output is identical -- it
+simply stops opening files that cannot contribute an event. Pass
+--no-time-filter to restore the old whole-mirror behaviour.
+
 Output: <outdir>/<EVENT>/<EVENT>_PH00.fits  (one file per event)
 
 Usage (needs the Fermitools environment):
@@ -32,6 +38,7 @@ similar); pass --pattern to override the glob if your mirror differs.
 """
 import argparse
 import csv
+import json
 import os
 import re
 import subprocess
@@ -66,7 +73,68 @@ def has_1tev_ceiling(path):
     return False
 
 
-def build_cone(row, weekly_list, outdir, env):
+def weekly_time_index(files, cache_path, jobs):
+    """Map each weekly file to its (TSTART, TSTOP), cached across runs.
+
+    gtselect applies the tmin/tmax cut itself, but only after opening and
+    scanning every file it is handed. A +-1e7 s window spans ~33 weeks, so
+    passing the whole mirror made each event re-read the entire mission (~45 min
+    per event, 14 times over). Handing it only the overlapping weeks gives
+    byte-identical output for a fraction of the I/O.  (Partha, 2026-08-18.)
+
+    Files whose headers cannot be read keep times of None and are always
+    included: never drop data we cannot prove is out of range.
+    """
+    cache = {}
+    if cache_path.exists():
+        try:
+            cache = json.loads(cache_path.read_text())
+        except Exception:
+            cache = {}
+
+    def stamp(p):
+        st = p.stat()
+        return f'{st.st_size}:{int(st.st_mtime)}'
+
+    def read_one(p):
+        key = str(p)
+        mark = stamp(p)
+        hit = cache.get(key)
+        if hit and hit.get('stamp') == mark:
+            return key, hit
+        rec = {'stamp': mark, 'tstart': None, 'tstop': None}
+        for ext in (0, 'EVENTS'):
+            try:
+                h = fits.getheader(p, ext)
+                if 'TSTART' in h and 'TSTOP' in h:
+                    rec['tstart'] = float(h['TSTART'])
+                    rec['tstop'] = float(h['TSTOP'])
+                    break
+            except Exception:
+                continue
+        return key, rec
+
+    with ThreadPoolExecutor(max_workers=max(jobs, 8)) as ex:
+        index = dict(ex.map(read_one, files))
+    try:
+        cache_path.write_text(json.dumps(index))
+    except Exception:
+        pass
+    return index
+
+
+def weeks_overlapping(files, index, tmin, tmax):
+    """Weekly files whose span intersects [tmin, tmax] (unknown spans kept)."""
+    keep = []
+    for p in files:
+        rec = index.get(str(p)) or {}
+        ts, te = rec.get('tstart'), rec.get('tstop')
+        if ts is None or te is None or (ts <= tmax and te >= tmin):
+            keep.append(p)
+    return keep
+
+
+def build_cone(row, weekly_list, outdir, env, weekly=None, index=None):
     name = row['name']
     d = outdir / sanitize(name)
     d.mkdir(parents=True, exist_ok=True)
@@ -79,6 +147,16 @@ def build_cone(row, weekly_list, outdir, env):
     tmax = min(t0 + DT, MISSION_TSTOP)
     if tmax <= tmin:
         return name, 'outside_mission_span'
+
+    # hand gtselect only the weeks that can contain events in [tmin, tmax];
+    # the cut it applies is unchanged, so the output is identical
+    n_used = n_all = 0
+    if weekly is not None and index is not None:
+        subset = weeks_overlapping(weekly, index, tmin, tmax)
+        n_used, n_all = len(subset), len(weekly)
+        if subset:
+            weekly_list = d / 'weekly_subset.txt'
+            weekly_list.write_text('\n'.join(str(x) for x in subset) + '\n')
 
     # per-event PFILES sandbox: concurrent fermitools jobs otherwise race on the
     # shared parameter files (bug catalogue B-20)
@@ -100,7 +178,8 @@ def build_cone(row, weekly_list, outdir, env):
         return name, 'FAILED D02 CHECK: energy ceiling below 1 TeV'
     with fits.open(out) as h:
         n = len(h['EVENTS'].data)
-    return name, f'ok ({n} events)'
+    span = f', {n_used}/{n_all} weeks read' if n_all else ''
+    return name, f'ok ({n} events{span})'
 
 
 def main():
@@ -112,6 +191,9 @@ def main():
     ap.add_argument('--outdir', required=True)
     ap.add_argument('--tiers', default='G1,G2')
     ap.add_argument('--jobs', type=int, default=4)
+    ap.add_argument('--no-time-filter', action='store_true',
+                    help='hand gtselect the whole mirror (the pre-2026-08-18 '
+                         'behaviour); use if the time index looks wrong')
     a = ap.parse_args()
 
     weekly = sorted(Path(a.weekly).glob(a.pattern))
@@ -129,10 +211,21 @@ def main():
     print(f'{len(rows)} events, tiers {sorted(tiers)}; '
           f'cone {QUERY_RADIUS} deg, +-{DT:.0e} s, {EMIN}-{EMAX} MeV')
 
+    index = None
+    if not a.no_time_filter:
+        print('indexing weekly file times (cached after the first run)...',
+              flush=True)
+        index = weekly_time_index(weekly, outdir / 'weekly_time_index.json',
+                                  a.jobs)
+        known = sum(1 for v in index.values() if v.get('tstart') is not None)
+        print(f'  {known}/{len(weekly)} files carry TSTART/TSTOP; '
+              f'{len(weekly) - known} unreadable and will always be included')
+
     env = dict(os.environ)
     results = {}
     with ThreadPoolExecutor(max_workers=a.jobs) as ex:
-        futs = [ex.submit(build_cone, r, listfile, outdir, env) for r in rows]
+        futs = [ex.submit(build_cone, r, listfile, outdir, env,
+                          weekly if index else None, index) for r in rows]
         for i, f in enumerate(futs, 1):
             name, status = f.result()
             results[name] = status
