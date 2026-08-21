@@ -59,7 +59,11 @@ qsub -t 1-$(wc -l < tasks.txt)%20        submit_pbs.sh      # PBS/Torque
 Per task: 1 node, 4 cores, 8 GB, 16 h walltime (they measure 8–10 h). At `%20`
 concurrency the 84 tasks are about one day. **To resume after anything** — node
 death, walltime kill, partial submit — just re-run `make_manifest.py` and
-resubmit; finished tasks are skipped automatically and nothing is recomputed.
+resubmit. Finished tasks are skipped, and a killed task keeps its own partial
+work: preprocessing is reused, and finished index rows are reused one by one, so
+a job killed at index 2.9 of 4.0 restarts near 2.9 instead of from zero. A row is
+only reused if it is complete, correctly labelled and finite. `FS_RESUME=0`
+forces a clean recompute.
 
 ## Then run the stacking — this part is yours too
 

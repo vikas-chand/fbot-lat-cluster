@@ -154,8 +154,20 @@ correctness does not depend on it. Each task: 1 node, 4 cores, ≤8 GB,
 python make_manifest.py --config cluster_config.yaml   # lists only what's left
 qsub -t 1-$(wc -l < tasks.txt)%20 submit_pbs.sh
 ```
-Completed tasks are skipped automatically; nothing is ever recomputed or
-corrupted by resubmission.
+Completed tasks are skipped automatically. Since 2026-08-20 a killed task also
+keeps its own partial work: finished preprocessing is reused, and finished index
+rows are reused row by row, so a job killed at index 2.9 of 4.0 restarts near 2.9
+rather than from the beginning. Expect a line like
+
+```
+[resume] AT2018cow PSF 2: reused 20/31 completed index rows
+```
+
+A row is only reused if it is complete, correctly labelled and finite; anything
+short, truncated mid-line or containing NaN is recomputed. If the scan
+configuration changes (flux grid, energy ceiling, edisp, or a re-run
+preprocessing that changes the ROI model), preserved rows are discarded rather
+than mixed. `FS_RESUME=0` forces a clean recompute.
 
 ## 6. Verify and collect
 

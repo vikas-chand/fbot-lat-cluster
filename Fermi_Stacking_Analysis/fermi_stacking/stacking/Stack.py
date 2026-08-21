@@ -30,6 +30,7 @@ from SummedLikelihood import *
 from astropy.io import fits
 from fermi_stacking.preprocessing.Preprocess import StackingAnalysis
 from fermi_stacking.analyze_results.AnalyzeResults import Analyze
+from fermi_stacking import resume as _fs_resume  # PATCH: checkpoint/resume
 
 
 # PATCH (audit D03/D04, 2026-08-12): shared helpers for edisp + catalog freedom.
@@ -166,21 +167,24 @@ class MakeStack(StackingAnalysis,Analyze):
         if(os.path.isdir(stacking_output)==False):
             os.system('mkdir %s' %stacking_output)
        
+        # PATCH (resume): this rmtree is why a killed job lost everything -- it
+        # deleted the finished rows before recomputing them. Under resume the
+        # directory is kept; scan-key mismatch below is what discards it.
+        _fs_keep = _fs_resume.enabled()
         if self.JLA == False:
             this_src_dir = os.path.join(stacking_output,srcname)
-            if(os.path.isdir(this_src_dir)==True):
+            if(os.path.isdir(this_src_dir)==True) and not _fs_keep:
                 shutil.rmtree(this_src_dir)
-            os.system('mkdir %s' %this_src_dir)
+            os.makedirs(this_src_dir, exist_ok=True)
         
         if self.JLA == True:
             this_likelihood = "Likelihood_" + str(PSF)
             this_likelihood_dir = os.path.join(stacking_output,this_likelihood)
             this_src_dir = os.path.join(this_likelihood_dir,srcname)
-            if(os.path.isdir(this_likelihood_dir)==False):
-                os.system('mkdir %s' %this_likelihood_dir)
-            if(os.path.isdir(this_src_dir)==True):
+            os.makedirs(this_likelihood_dir, exist_ok=True)
+            if(os.path.isdir(this_src_dir)==True) and not _fs_keep:
                 shutil.rmtree(this_src_dir)
-            os.system('mkdir %s' %this_src_dir)
+            os.makedirs(this_src_dir, exist_ok=True)
         
         if self.use_scratch == False:
             os.chdir(this_src_dir)
@@ -193,9 +197,11 @@ class MakeStack(StackingAnalysis,Analyze):
             
             if self.JLA == False:
                 this_scratch_dir = os.path.join(stacking_scratch,srcname)
+                # scratch is volatile; always start it clean. Completed rows
+                # are read back from this_src_dir, where they were copied.
                 if(os.path.isdir(this_scratch_dir)==True):
                     shutil.rmtree(this_scratch_dir)
-                os.system('mkdir %s' %this_scratch_dir)
+                os.makedirs(this_scratch_dir, exist_ok=True)
             
                 os.chdir(this_scratch_dir)
 
@@ -222,7 +228,47 @@ class MakeStack(StackingAnalysis,Analyze):
         index = np.around(index,decimals=1)
         index = index.tolist()
 
+        # PATCH (resume). Rows are independent GIVEN IDENTICAL INPUTS, and the
+        # directory name encodes only (event, window) -- not the flux grid, the
+        # energy ceiling, edisp, or the fitted ROI model. A preserved row from a
+        # different configuration is otherwise indistinguishable from a current
+        # one, and if only the flux range changed even the array shape matches,
+        # so nothing downstream would notice. Key the resume on the inputs that
+        # actually determine the numbers; on mismatch, discard rather than mix.
+        _fs_base = true_name if replace_name else srcname
+        _fs_key = _fs_resume.scan_key(self, PSF, extra={
+            'roi_model': _fs_resume._file_digest('fit_model_3_0%s.xml' %PSF),
+            'srcmap_size': (os.path.getsize('srcmap_0%s.fits' %PSF)
+                            if os.path.isfile('srcmap_0%s.fits' %PSF) else 0),
+        })
+        if _fs_keep:
+            _fs_prev = _fs_resume.read_key(this_src_dir)
+            if _fs_prev is not None and _fs_prev != _fs_key:
+                print("[resume] scan configuration changed -- discarding "
+                      "preserved rows in %s" % this_src_dir)
+                for _f in os.listdir(this_src_dir):
+                    if _f.endswith('.txt') or _f == '.scan_key.json':
+                        try:
+                            os.remove(os.path.join(this_src_dir, _f))
+                        except OSError:
+                            pass
+            _fs_resume.write_key(this_src_dir, _fs_key,
+                                 note={'source': _fs_base, 'psf': int(PSF)})
+
+        _fs_skipped = 0
         for i in range(len(index)):
+
+            # PATCH (resume): skip a row only when its file is COMPLETE --
+            # right record count, five fields each, and the per-line index stamp
+            # matching this row. A kill mid-write leaves a short file that would
+            # otherwise be parsed silently into wrong numbers.
+            if _fs_keep:
+                _fs_row = os.path.join(
+                    this_src_dir, _fs_resume.row_name(_fs_base, np.fabs(index[i])))
+                if _fs_resume.row_is_complete(_fs_row, self.num_flux_bins,
+                                              np.fabs(index[i])):
+                    _fs_skipped += 1
+                    continue
 
             # Fix names for sources with offset positions:
             if replace_name == True:
@@ -282,9 +328,11 @@ class MakeStack(StackingAnalysis,Analyze):
                 srcname = true_name
 
             # Write Files:
-            with open('%s_stacking_%s.txt' %(srcname,np.fabs(index[i])),'w') as f:
-                f.write(output)
-            f.close()
+            # PATCH (resume): atomic. The old truncating write left a partial
+            # row if the job was killed mid-write, and a row truncated mid-LINE
+            # is parsed without complaint into bad numbers.
+            _fs_resume.write_row_atomic(
+                '%s_stacking_%s.txt' %(srcname,np.fabs(index[i])), output)
 
             # Copy files to main output directory:
             if self.use_scratch == True:
@@ -294,6 +342,10 @@ class MakeStack(StackingAnalysis,Analyze):
             del Flux,Index,LOG_LIKE,Fit_Qual,Conv
             gc.collect() #dump unused memory to speed up calculation
 	
+        if _fs_keep and _fs_skipped:
+            print("[resume] %s PSF %s: reused %d/%d completed index rows"
+                  % (_fs_base, PSF, _fs_skipped, len(index)))
+
         os.chdir(self.home)
         
         return
@@ -445,9 +497,22 @@ class MakeStack(StackingAnalysis,Analyze):
                 # A Principe et al. 2023 style analysis uses 3 ENERGY-band
                 # components, so component 3 never exists. Derive from the
                 # Likelihood_* directories actually present.
-                import glob as _glob
-                _ldirs = sorted(_glob.glob(os.path.join(self.home, "Stacked_Sources", "Likelihood_*")))
-                _js = [int(os.path.basename(d).split('_')[1]) for d in _ldirs] or [0,1,2,3]
+                # PATCH: the previous glob had no isdir filter and int()-parsed
+                # the suffix, so a stray file (Likelihood_0.done) crashed it and a
+                # stale directory from an earlier 4-component run silently added a
+                # phantom component to the sum -- shape (31,80) either way, so
+                # nothing downstream could tell. Directories with integer suffixes
+                # only, and the count must match what the caller asked for.
+                _js = [j for j, _d in
+                       _fs_resume.component_dirs(os.path.join(self.home, "Stacked_Sources"))]
+                _want = getattr(self, '_fs_expected_ncomp', None)
+                if _want is not None and _js != list(range(int(_want))):
+                    raise SystemExit(
+                        "combine_likelihood: expected components %s but found %s "
+                        "under Stacked_Sources. Refusing to stack an incomplete or "
+                        "contaminated component set." % (list(range(int(_want))), _js))
+                if not _js:
+                    _js = [0,1,2,3]
                 for j in _js:
             
                     likelihood_dir = "Preprocessed_Sources/%s/output/null_likelihood_%s.txt" %(srcname,str(j))

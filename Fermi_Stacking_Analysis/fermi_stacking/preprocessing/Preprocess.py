@@ -28,6 +28,7 @@ import gc
 import pyLikelihood 
 from BinnedAnalysis import *
 from astropy.io import fits
+from fermi_stacking import resume as _fs_resume  # PATCH: checkpoint/resume
 import pandas as pd
 import math
 from scipy.stats import norm
@@ -373,12 +374,37 @@ class StackingAnalysis:
         if(os.path.isdir(preprocess_output)==False):
             os.system('mkdir %s' %preprocess_output)
 
-        # Remove src output directory if it already exists:
         src_output_main = os.path.join(preprocess_output,srcname)
+
+        # PATCH (resume). This rmtree meant a killed task redid hours of
+        # preprocessing on every restart -- and, worse, changed the ROI model
+        # underneath any stacking rows that had survived. Skip is ALL-OR-NOTHING
+        # on purpose: fermipy regenerates on os.path.isfile alone with no
+        # integrity check, and source-finding mutates srcmaps in place, so a
+        # half-finished directory is not a clean function of the configuration.
+        # Anything short of complete is deleted and redone.
+        # Placed before the rmtree and before any chdir, so cwd is self.home on
+        # both paths.
+        _fs_ncomp = len(components) if components else 4
+        if (_fs_resume.enabled() and not self.use_scratch
+                and _fs_resume.preprocessing_complete(src_output_main, _fs_ncomp)):
+            # run_preprocessing's ONLY object-attribute side effect is
+            # self.ltcube (set to a relative path late in the method, then read
+            # by run_stacking). The skip path must leave the same postcondition,
+            # absolute, and ltcube_00 for every component exactly as the
+            # executed path does.
+            self.ltcube = os.path.join(src_output_main,'output','ltcube_00.fits')
+            self._fs_expected_ncomp = _fs_ncomp
+            print("[resume] preprocessing already complete for %s (%d components)"
+                  " -- skipping" % (srcname, _fs_ncomp))
+            return
+
+        # Remove src output directory if it already exists:
         if(os.path.isdir(src_output_main)==True):
             shutil.rmtree(src_output_main)
         # Make src output directory:
-        os.system('mkdir %s' %src_output_main)
+        os.makedirs(src_output_main, exist_ok=True)
+        self._fs_expected_ncomp = _fs_ncomp
 
         # Define scratch directory for source:
         if self.use_scratch == True:

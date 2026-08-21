@@ -92,9 +92,16 @@ VERIFY: the array is queued and the first task's log appears under
 
 ### Phase 3 — wait, and resume
 
-A task taking ten hours is normal, not a hang. To resume after node death,
-walltime kill, or a partial submit, re-run `make_manifest.py` (it lists only
-what is left) and resubmit. Completed tasks are skipped automatically.
+A task taking ten to twenty-four hours is normal, not a hang. To resume after
+node death, walltime kill, or a partial submit, re-run `make_manifest.py` (it
+lists only what is left) and resubmit. Completed tasks are skipped, and a killed
+task now resumes from its last finished index row rather than restarting.
+
+Do NOT "help" the resume: never delete `Stacked_Sources/` or
+`Preprocessed_Sources/` to get a clean start, and never hand-edit a
+`*_stacking_*.txt`. Those directories are the checkpoint. If a task refuses to
+combine because rows are `nonfinite`, that means fits diverged — report it,
+do not delete the rows and rerun until it passes.
 
 VERIFY: `ls $CAMPAIGN_ROOT/runs/*/Add_Stacking/Numpy_Arrays/*.npy | wc -l`
 climbs toward 84. A task that failed leaves no `.npy`; its log is in

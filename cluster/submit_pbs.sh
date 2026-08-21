@@ -2,7 +2,7 @@
 #PBS -N fbot-binned
 #PBS -j oe
 #PBS -o logs/
-#PBS -l walltime=16:00:00      # tasks measure 8-10 h; 8 h killed most of them
+#PBS -l walltime=24:00:00      # measured ~23 h/task; resume covers any overrun
 #PBS -l nodes=1:ppn=4
 # Array submission:  qsub -t 1-$(wc -l < tasks.txt)%20 submit_pbs.sh
 # (Karwin's own package targets PBS, so this wrapper mirrors his usage; use it
@@ -18,6 +18,10 @@ ENVNAME=$(sed -n 's/^conda_env:[[:space:]]*//p' "$CONFIG" | sed 's/#.*//; s/["'"
 
 source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh
 conda activate "$ENVNAME"
+
+# Resume is on by default: a killed task keeps its finished index rows
+# and its preprocessing. Set FS_RESUME=0 to force a clean recompute.
+export FS_RESUME=${FS_RESUME:-1}
 
 TASKID=${PBS_ARRAYID:-$PBS_ARRAY_INDEX}
 LINE=$(sed -n "${TASKID}p" tasks.txt)

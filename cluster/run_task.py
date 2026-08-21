@@ -91,7 +91,20 @@ def main():
     rundir = Path(P['outdir']) / f"{a.event}_{a.window}"
     done = rundir / 'Add_Stacking' / 'Numpy_Arrays' / f"{a.event}_{a.window}.npy"
     if done.exists():
-        print(f"SKIP already complete: {done}"); return 0
+        # An existence-only gate on a non-atomically written file marks a task
+        # permanently complete if it was killed during the final np.save, and it
+        # is then skipped forever. Validate the array instead.
+        try:
+            import numpy as _np
+            _arr = _np.load(done)
+            _ok = (_arr.shape == (31, 80)) and bool(_np.isfinite(_arr).all())
+        except Exception as _exc:
+            print(f"  existing product unreadable ({_exc}); recomputing")
+            _ok = False
+        if _ok:
+            print(f"SKIP already complete: {done}"); return 0
+        print(f"  existing product failed validation; recomputing {done}")
+        done.unlink(missing_ok=True)
     rundir.mkdir(parents=True, exist_ok=True)
 
     src = Path(P['ft1_tree']) / a.event
@@ -199,13 +212,50 @@ ROI_radius: {cfg['analysis']['roi_radius_deg']}
     inst.ltcube = str(lt)
     import glob as g
     ncomp = len(g.glob(str(rundir / 'Preprocessed_Sources' / a.event / 'output' / 'srcmap_0*.fits')))
+    # Component count is derived from a bare file count elsewhere in the
+    # pipeline; if it disagrees with the components we configured, a stack would
+    # silently be built from the wrong number of energy bands.
+    if ncomp != len(comps):
+        raise SystemExit(
+            f"component mismatch: configured {len(comps)} Principe components but "
+            f"found {ncomp} srcmap_0*.fits in the preprocessing output. Refusing "
+            f"to stack. Delete {rundir}/Preprocessed_Sources and rerun.")
+    inst._fs_expected_ncomp = ncomp
     for c in range(ncomp):
         inst.run_stacking(a.event, c)
     os.chdir(rundir)
+
+    # Every component, every index row, present and complete before combining.
+    # A missing ROW crashes combine_likelihood loudly; a missing COMPONENT was
+    # silent. Check both here so neither can reach a saved product.
+    from fermi_stacking import resume as _fs_resume
+    _nflux, _idx = 80, [round(1.0 + 0.1 * k, 1) for k in range(31)]
+    for c in range(ncomp):
+        _d = rundir / 'Stacked_Sources' / f'Likelihood_{c}' / a.event
+        _bad = {}
+        for v in _idx:
+            st = _fs_resume.row_status(
+                str(_d / _fs_resume.row_name(a.event, v)), _nflux, v)
+            if st != 'ok':
+                _bad.setdefault(st, []).append(v)
+        if _bad:
+            _why = '; '.join(f'{k}: {len(v)} rows (first {v[0]})'
+                             for k, v in sorted(_bad.items()))
+            _hint = ("Resubmit -- completed rows are kept and it will resume."
+                     if set(_bad) <= {'missing', 'empty', 'short', 'malformed'}
+                     else "NOTE: 'nonfinite' means fits diverged, not that the "
+                          "job was killed. Resubmitting will recompute those "
+                          "rows and most likely reproduce them; investigate "
+                          "before trusting this event.")
+            raise SystemExit(
+                f"component {c}: {sum(len(v) for v in _bad.values())} of "
+                f"{len(_idx)} index rows unusable -- {_why}. {_hint}")
+
     inst.combine_likelihood([], f"{a.event}_{a.window}", likelihood_home=str(rundir))
     meta = dict(event=a.event, window=a.window, tmin=tmin, tmax=tmax,
                 emax_mev=emax, edisp=os.environ['FS_EDISP'],
                 free_radius_deg=fr, ncomp=ncomp,
+                resume_enabled=os.environ.get('FS_RESUME', '1') != '0',
                 **provenance.fingerprint())
     (rundir / 'task_meta.json').write_text(json.dumps(meta, indent=2))
     print(f"DONE {a.event} {a.window}")

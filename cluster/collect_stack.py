@@ -90,6 +90,11 @@ def main():
     for p in pats:
         ev = Path(p).name.replace(f'_{a.window}.npy', '')
         arr = np.load(p)
+        # A diverging fit writes 'nan' into a row that is otherwise complete;
+        # summed here it would silently poison the stacked surface and surface
+        # only as 'Infinity' in the manifest.
+        if not np.isfinite(arr).all():
+            raise SystemExit(f'{p}: contains non-finite cells; refusing to stack')
         if arr.shape != (len(IDX), len(FLUX)):
             raise SystemExit(f'{p}: unexpected shape {arr.shape}')
         stack += arr - arr[:, :1]      # per-index-row null reference, TS units

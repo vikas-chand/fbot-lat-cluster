@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=fbot-binned
 #SBATCH --output=logs/%x_%A_%a.out
-#SBATCH --time=16:00:00        # tasks measure 8-10 h; 8 h killed most of them
+#SBATCH --time=24:00:00        # measured ~23 h/task; resume covers any overrun
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -19,6 +19,10 @@ ENVNAME=$(sed -n 's/^conda_env:[[:space:]]*//p' "$CONFIG" | sed 's/#.*//; s/["'"
 
 source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh
 conda activate "$ENVNAME"
+
+# Resume is on by default: a killed task keeps its finished index rows
+# and its preprocessing. Set FS_RESUME=0 to force a clean recompute.
+export FS_RESUME=${FS_RESUME:-1}
 
 LINE=$(sed -n "${SLURM_ARRAY_TASK_ID}p" tasks.txt)
 EVENT=$(echo "$LINE" | awk '{print $1}')
