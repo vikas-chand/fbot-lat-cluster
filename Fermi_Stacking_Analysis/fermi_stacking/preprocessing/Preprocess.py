@@ -63,43 +63,81 @@ def _fs_binned_config():
 
 
 def _fs_free_nearby(like, xmlfile, skip=()):
-    """Optional Principe-style catalog freedom (D04): free the spectral
-    parameters of point sources within FS_FREE_RADIUS_DEG degrees of the
-    ROI centre. Unset/empty -> original behaviour (all catalog frozen)."""
-    import os as _os, math as _math, re as _re
+    r"""Principe-style catalog freedom (D04): free the spectral parameters of
+    point sources within FS_FREE_RADIUS_DEG degrees of the ROI centre.
+    Unset/empty FS_FREE_RADIUS_DEG -> original behaviour (all catalog frozen).
+
+    REWRITTEN 2026-09-12 after methods-audit M15. The previous implementation
+    matched source positions with the regex
+
+        name="RA"\s+value="([\d.+-]+)"
+
+    but fermipy writes  name="RA" scale="1" value="236.3776"  -- the scale
+    attribute sits between, so the pattern never matched. It found ZERO sources
+    in models containing 68 real RA/DEC parameters, hit `if not srcs: return`,
+    and every catalog source silently stayed frozen for the whole campaign,
+    while task_meta.json faithfully recorded free_radius_deg=2.0. Metadata
+    saying "free" is not evidence of freedom.
+
+    Now: XML parsing rather than regex, true angular separation rather than a
+    flat-sky approximation, and it RAISES on failure instead of returning
+    silently, so an inactive patch can never again look like a working one.
+    """
+    import os as _os
+    import math as _math
+    import xml.etree.ElementTree as _ET
+
     rad = _os.environ.get('FS_FREE_RADIUS_DEG', '')
     if not rad:
-        return
+        return []
     rad = float(rad)
-    txt = open(xmlfile).read()
-    ra0 = dec0 = None
-    m = _re.search(r'name="ROI".*?RA="([\d.+-]+)".*?DEC="([\d.+-]+)"', txt, _re.S)
-    srcs = {}
-    for sm in _re.finditer(r'<source[^>]*name="([^"]+)"(.*?)</source>', txt, _re.S):
-        nm, body = sm.group(1), sm.group(2)
-        pm = _re.search(r'name="RA"\s+value="([\d.+-]+)"', body)
-        qm = _re.search(r'name="DEC"\s+value="([\d.+-]+)"', body)
-        if pm and qm:
-            srcs[nm] = (float(pm.group(1)), float(qm.group(1)))
-    if not srcs:
-        return
-    # ROI centre: mean of source positions is unreliable; use env override,
-    # else the target position supplied by the caller via skip[0] lookup.
+
     ra0 = float(_os.environ.get('FS_ROI_RA', 'nan'))
     dec0 = float(_os.environ.get('FS_ROI_DEC', 'nan'))
     if ra0 != ra0 or dec0 != dec0:
-        return
-    for nm, (ra, dec) in srcs.items():
+        raise RuntimeError(
+            'FS_FREE_RADIUS_DEG is set but FS_ROI_RA/FS_ROI_DEC are not; '
+            'refusing to silently skip catalog freedom (audit M15).')
+
+    root = _ET.parse(xmlfile).getroot()
+    srcs = {}
+    for src in root.iter('source'):
+        nm = src.get('name')
+        pos = {}
+        for par in src.iter('parameter'):
+            if par.get('name') in ('RA', 'DEC'):
+                try:
+                    pos[par.get('name')] = (float(par.get('value'))
+                                            * float(par.get('scale', 1.0)))
+                except (TypeError, ValueError):
+                    pass
+        if 'RA' in pos and 'DEC' in pos:
+            srcs[nm] = (pos['RA'], pos['DEC'])
+    if not srcs:
+        raise RuntimeError(
+            'no point-source positions parsed from %s; catalog freedom would '
+            'be a no-op (audit M15)' % xmlfile)
+
+    def _sep(ra1, dec1, ra2, dec2):
+        r1, d1, r2, d2 = map(_math.radians, (ra1, dec1, ra2, dec2))
+        c = (_math.sin(d1) * _math.sin(d2)
+             + _math.cos(d1) * _math.cos(d2) * _math.cos(r1 - r2))
+        return _math.degrees(_math.acos(max(-1.0, min(1.0, c))))
+
+    freed = []
+    for nm, (ra, dec) in sorted(srcs.items()):
         if nm in skip:
             continue
-        d = _math.hypot((ra - ra0) * _math.cos(_math.radians(dec0)), dec - dec0)
-        if d <= rad:
-            try:
-                spec = like.model[nm].funcs['Spectrum']
-                for pn in spec.paramNames:
-                    spec.getParam(pn).setFree(True)
-            except Exception:
-                pass
+        if _sep(ra, dec, ra0, dec0) <= rad:
+            spec = like.model[nm].funcs['Spectrum']
+            for pn in spec.paramNames:
+                spec.getParam(pn).setFree(True)
+            freed.append(nm)
+    print('[D04] catalog freedom: %d of %d sources freed within %.2f deg of '
+          '(%.4f, %.4f): %s' % (len(freed), len(srcs), rad, ra0, dec0,
+                                ', '.join(freed) if freed else '(none in radius)'))
+    return freed
+
 
 class StackingAnalysis:
    
