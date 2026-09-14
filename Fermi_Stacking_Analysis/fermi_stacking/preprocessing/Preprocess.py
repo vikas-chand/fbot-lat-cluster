@@ -124,15 +124,33 @@ def _fs_free_nearby(like, xmlfile, skip=()):
              + _math.cos(d1) * _math.cos(d2) * _math.cos(r1 - r2))
         return _math.degrees(_math.acos(max(-1.0, min(1.0, c))))
 
-    freed = []
+    # The XML can legitimately contain sources this likelihood object does not
+    # carry -- fermipy's find_sources adds PS J.... entries to the model file,
+    # and a component's model need not hold every source in the file. Look the
+    # name up defensively and REPORT misses; do not crash (2026-09-14) and do
+    # not swallow them the way the original bare `except Exception: pass` did,
+    # which is how the whole patch stayed silently inert (audit M15).
+    freed, missing = [], []
     for nm, (ra, dec) in sorted(srcs.items()):
         if nm in skip:
             continue
-        if _sep(ra, dec, ra0, dec0) <= rad:
-            spec = like.model[nm].funcs['Spectrum']
-            for pn in spec.paramNames:
-                spec.getParam(pn).setFree(True)
-            freed.append(nm)
+        if _sep(ra, dec, ra0, dec0) > rad:
+            continue
+        src = None
+        try:
+            src = like.model[nm]
+        except Exception:
+            src = None
+        if src is None:
+            missing.append(nm)
+            continue
+        spec = src.funcs['Spectrum']
+        for pn in spec.paramNames:
+            spec.getParam(pn).setFree(True)
+        freed.append(nm)
+    if missing:
+        print('[D04] in radius but absent from this likelihood model '
+              '(not freed): %s' % ', '.join(missing))
     print('[D04] catalog freedom: %d of %d sources freed within %.2f deg of '
           '(%.4f, %.4f): %s' % (len(freed), len(srcs), rad, ra0, dec0,
                                 ', '.join(freed) if freed else '(none in radius)'))
